@@ -1,7 +1,11 @@
 import AppAuth
 import os.log
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// The Kinde authentication service
+@available(iOS 15.0, *)
 public final class Auth {
     @Atomic private var currentAuthorizationFlow: OIDExternalUserAgentSession?
     
@@ -15,6 +19,14 @@ public final class Auth {
         self.authStateRepository = authStateRepository
         self.logger = logger
     }
+    
+    // MARK: - Service Properties
+    
+    /// Claims service for accessing user claims from tokens
+    public lazy var claims: ClaimsService = ClaimsService(auth: self, logger: logger)
+    
+    /// Management API client for managing users, organizations, permissions, etc.
+    public lazy var management: ManagementClient = ManagementClient(auth: self, logger: logger)
     
     /// Is the user authenticated as of the last use of authentication state?
     public func isAuthorized() -> Bool {
@@ -596,11 +608,6 @@ extension Auth {
         case organisationCodes = "org_codes"
         case featureFlags = "feature_flags"
     }
-}
-
-public struct Claim {
-    public let name: String
-    public let value: Any
 }
 
 public struct Flag {

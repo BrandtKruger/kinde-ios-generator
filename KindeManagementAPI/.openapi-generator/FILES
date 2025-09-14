@@ -23,6 +23,10 @@ Sources/KindeSDK/Auth/Config.swift
 Sources/KindeSDK/Auth/DefaultLogger.swift
 Sources/KindeSDK/Auth/FlagError.swift
 Sources/KindeSDK/Auth/Tokens.swift
+Sources/KindeSDK/Management/ManagementClient.swift
+Sources/KindeSDK/Models/Claims.swift
+Sources/KindeSDK/Models/ManagementModels.swift
+Sources/KindeSDK/Models/Pagination.swift
 Sources/KindeSDK/Models/User.swift
 Sources/KindeSDK/Models/UserProfile.swift
 Sources/KindeSDK/Utils/APIHelper.swift
@@ -40,8 +44,10 @@ Sources/KindeSDK/Utils/String+JWTTokenDecode.swift
 Sources/KindeSDK/Utils/URLSessionImplementations.swift
 Tests/AuthErrorSpec.swift
 Tests/AuthSpec.swift
+Tests/ClaimsSpec.swift
 Tests/ConfigSpec.swift
 Tests/DefaultLoggerSpec.swift
+Tests/ManagementPaginationSpec.swift
 Tests/StringJWTTokenDecodeSpec.swift
 docs/OAuthAPI.md
 docs/User.md
