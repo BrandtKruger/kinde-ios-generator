@@ -14,12 +14,11 @@ final class ClaimsSpec: XCTestCase {
         mockLogger = MockLogger()
         
         let config = Config(
-            issuer: "https://test.kinde.com",
             clientId: "test_client_id",
-            redirectUri: "https://test.com/callback",
-            postLogoutRedirectUri: "https://test.com/logout",
-            scope: "openid profile email",
-            audience: nil
+            domain: "test.kinde.com",
+            redirectUrl: URL(string: "https://test.com/callback")!,
+            logoutRedirectUrl: URL(string: "https://test.com/logout")!,
+            scope: "openid profile email"
         )
         
         auth = Auth(config: config, authStateRepository: mockAuthStateRepository, logger: mockLogger)
@@ -282,6 +281,21 @@ final class ClaimsSpec: XCTestCase {
     
     // MARK: - Test Hard Checks (Validation)
     
+    func testInvalidTokenTypeValidation() {
+        setupMockAuthState()
+        
+        // Test with invalid token type - should return empty claims
+        let invalidClaims = claims.getAllClaims(tokenType: TokenType(rawValue: "invalid_token")!)
+        XCTAssertEqual(invalidClaims.count, 0)
+        
+        // Test getClaim with invalid token type
+        let invalidClaim = claims.getClaim(claimName: "aud", tokenType: TokenType(rawValue: "invalid_token")!)
+        XCTAssertNil(invalidClaim)
+        
+        // Test hasClaim with invalid token type
+        let hasInvalidClaim = claims.hasClaim(claimName: "aud", tokenType: TokenType(rawValue: "invalid_token")!)
+        XCTAssertFalse(hasInvalidClaim)
+    }
     
     func testEmptyClaimNameValidation() {
         setupMockAuthState()

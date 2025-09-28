@@ -7,7 +7,7 @@
 import Foundation
 
 /// Pagination parameters for API requests
-public struct PaginationParams: Codable {
+public struct PaginationParams {
     /// Number of results per page. Defaults to 10 if not specified
     public let pageSize: Int?
     /// Token to get the next page of results
@@ -20,7 +20,7 @@ public struct PaginationParams: Codable {
 }
 
 /// Paginated response containing data and pagination information
-public struct PaginatedResponse<T: Codable>: Codable {
+public struct PaginatedResponse<T: Codable> {
     /// The response code
     public let code: String?
     /// The response message
