@@ -57,6 +57,9 @@ files:
    Auth/FlagError.swift: {
       destinationFilename: Sources/KindeSDK/Auth/FlagError.swift
    }
+   Auth/MobileEntitlements.swift: {
+      destinationFilename: Sources/KindeSDK/Auth/MobileEntitlements.swift
+   }
    
    Models/Claims.swift: {
       destinationFilename: Sources/KindeSDK/Models/Claims.swift

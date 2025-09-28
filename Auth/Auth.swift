@@ -1,3 +1,4 @@
+import Foundation
 import AppAuth
 import os.log
 #if canImport(UIKit)
@@ -5,7 +6,6 @@ import UIKit
 #endif
 
 /// The Kinde authentication service
-@available(iOS 15.0, *)
 public final class Auth {
     @Atomic private var currentAuthorizationFlow: OIDExternalUserAgentSession?
     
@@ -405,7 +405,7 @@ public final class Auth {
 
                 let request = OIDAuthorizationRequest(configuration: configuration,
                                                       clientId: self.config.clientId,
-                                                      clientSecret: nil, // Only required for Client Credentials Flow
+                                                      clientSecret: self.config.clientSecret,
                                                       scope: self.config.scope,
                                                       redirectURL: redirectUrl,
                                                       responseType: OIDResponseTypeCode,
@@ -508,6 +508,10 @@ public final class Auth {
         }catch {
             throw AuthError.notAuthenticated
         }
+    }
+    
+    public func getTokenResponse() -> OIDTokenResponse? {
+        return authStateRepository.state?.lastTokenResponse
     }
 }
 

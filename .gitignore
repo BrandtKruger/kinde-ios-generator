@@ -4,3 +4,20 @@
 
 # Node.js
 node_modules/
+
+# Swift Package Manager
+.build/
+*.xcodeproj/
+*.xcworkspace/
+
+# Generated SDK files (keep templates and config, ignore generated output)
+KindeManagementAPI/
+!KindeManagementAPI/README.md
+!KindeManagementAPI/LICENSE
+
+# Temporary scripts (these were used for the old approach)
+make-accounts-internal.sh
+make-accounts-models-internal.sh
+
+# Documentation (optional - you might want to keep this)
+# iOS_Entitlements_Guide.md

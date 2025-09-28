@@ -21,6 +21,17 @@ class AuthSpec: QuickSpec {
                 let audClaim = auth.getClaim(forKey: "aud")
                 expect(audClaim).notTo(beNil())
                 
+                // Test getClaim with different token types
+                let audClaimAccessToken = auth.getClaim(forKey: "aud", token: .accessToken)
+                expect(audClaimAccessToken).notTo(beNil())
+                
+                let audClaimIdToken = auth.getClaim(forKey: "aud", token: .idToken)
+                expect(audClaimIdToken).notTo(beNil())
+                
+                // Test getClaim with non-existent claim
+                let nonExistentClaim = auth.getClaim(forKey: "non_existent_claim")
+                expect(nonExistentClaim).to(beNil())
+                
                 let permissions = auth.getPermissions()
                 expect(permissions).notTo(beNil())
                 
@@ -79,6 +90,18 @@ class AuthSpec: QuickSpec {
                         expect(auth.isAuthorized()).to(beFalse())
                     }
                 }
+            }
+            
+            it("check getTokenResponse function") {
+                KindeSDKAPI.configure()
+                let auth: Auth = KindeSDKAPI.auth
+                
+                // Test getTokenResponse when not authorized
+                let tokenResponse = auth.getTokenResponse()
+                expect(tokenResponse).to(beNil())
+                
+                // Note: When authorized, getTokenResponse should return the OIDTokenResponse
+                // This would require setting up a proper auth state for full testing
             }
         }
     }
