@@ -102,7 +102,7 @@ import os.log
 
 /// The Kinde claims service for accessing user claims from tokens
 public final class ClaimsService {
-    private let auth: Auth
+    private unowned let auth: Auth
     private let logger: LoggerProtocol
     
     init(auth: Auth, logger: LoggerProtocol) {
