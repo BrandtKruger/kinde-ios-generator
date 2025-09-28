@@ -4,7 +4,7 @@ import Foundation
 /// This class provides client-side validation of user entitlements, feature flags, and hard checks
 /// based on JWT token claims, following iOS mobile app best practices.
 public class MobileEntitlements {
-    private let auth: Auth
+    private unowned let auth: Auth
     private let logger: LoggerProtocol
     
     public init(auth: Auth, logger: LoggerProtocol = DefaultLogger()) {
