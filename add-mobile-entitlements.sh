@@ -6,8 +6,8 @@ AUTH_FILE="KindeManagementAPI/Sources/KindeSDK/Auth/Auth.swift"
 if [ -f "$AUTH_FILE" ]; then
     echo "Adding MobileEntitlements property to Auth.swift..."
     
-    # Add the MobileEntitlements property after the management property
-    sed -i '' '/public lazy var management: ManagementClient = ManagementClient(auth: self, logger: logger)/a\
+    # Add the MobileEntitlements property after the claims property
+    sed -i '' '/public lazy var claims: ClaimsService = ClaimsService(auth: self, logger: logger)/a\
     \
     /// Mobile entitlements system for client-side validation\
     public lazy var entitlements: MobileEntitlements = MobileEntitlements(auth: self, logger: logger)\

@@ -6,6 +6,7 @@ import UIKit
 #endif
 
 /// The Kinde authentication service
+@available(iOS 16.0, *)
 public final class Auth {
     @Atomic private var currentAuthorizationFlow: OIDExternalUserAgentSession?
     
@@ -25,8 +26,8 @@ public final class Auth {
     /// Claims service for accessing user claims from tokens
     public lazy var claims: ClaimsService = ClaimsService(auth: self, logger: logger)
     
-    /// Management API client for managing users, organizations, permissions, etc.
-    public lazy var management: ManagementClient = ManagementClient(auth: self, logger: logger)
+    /// Mobile entitlements system for client-side validation
+    public lazy var entitlements: MobileEntitlements = MobileEntitlements(auth: self, logger: logger)
     
     /// Is the user authenticated as of the last use of authentication state?
     public func isAuthorized() -> Bool {
@@ -658,4 +659,686 @@ public struct Permissions {
 
 public struct UserOrganizations {
     public let orgCodes: [Organization]
+}
+//
+// Claims.swift
+//
+// Kinde SDK Claims Model
+//
+
+import Foundation
+
+/// Represents a claim from a JWT token
+public struct Claim {
+    /// The name of the claim
+    public let name: String
+    /// The value of the claim
+    public let value: Any?
+    
+    public init(name: String, value: Any?) {
+        self.name = name
+        self.value = value
+    }
+}
+
+/// Represents all claims from a token
+public struct Claims {
+    /// Dictionary of all claims
+    public let claims: [String: Any]
+    
+    public init(claims: [String: Any]) {
+        self.claims = claims
+    }
+    
+    /// Get a specific claim by name
+    /// - Parameter name: The name of the claim to retrieve
+    /// - Returns: A Claim object with the name and value, or nil if not found
+    public func getClaim(name: String) -> Claim? {
+        guard let value = claims[name] else {
+            return nil
+        }
+        return Claim(name: name, value: value)
+    }
+    
+    /// Get all claim names
+    /// - Returns: Array of claim names
+    public func getClaimNames() -> [String] {
+        return Array(claims.keys)
+    }
+    
+    /// Check if a claim exists
+    /// - Parameter name: The name of the claim to check
+    /// - Returns: True if the claim exists, false otherwise
+    public func hasClaim(name: String) -> Bool {
+        return claims[name] != nil
+    }
+    
+    /// Get the count of claims
+    /// - Returns: Number of claims
+    public var count: Int {
+        return claims.count
+    }
+}
+
+/// Common claim keys used in Kinde tokens
+public enum ClaimKey: String, CaseIterable {
+    // Standard JWT claims
+    case audience = "aud"
+    case issuer = "iss"
+    case subject = "sub"
+    case expiration = "exp"
+    case issuedAt = "iat"
+    case notBefore = "nbf"
+    
+    // User information (typically in ID token)
+    case email = "email"
+    case givenName = "given_name"
+    case familyName = "family_name"
+    case name = "name"
+    case picture = "picture"
+    case emailVerified = "email_verified"
+    
+    // Organization information
+    case organizationCode = "org_code"
+    case organizationName = "org_name"
+    case organizationId = "org_id"
+    case organizationCodes = "org_codes"
+    
+    // Permissions and roles
+    case permissions = "permissions"
+    case roles = "roles"
+    
+    // Feature flags
+    case featureFlags = "feature_flags"
+    
+    // Custom claims (prefixed with custom:)
+    case customRole = "custom:role"
+    case customPreferences = "custom:preferences"
+    case customSettings = "custom:settings"
+}
+
+// MARK: - Claims Service
+
+import Foundation
+import os.log
+
+/// The Kinde claims service for accessing user claims from tokens
+public final class ClaimsService {
+    private let auth: Auth
+    private let logger: LoggerProtocol
+    
+    init(auth: Auth, logger: LoggerProtocol) {
+        self.auth = auth
+        self.logger = logger
+    }
+    
+    /// Get a specific claim from the user's tokens
+    /// - Parameters:
+    ///   - claimName: The name of the claim to retrieve (e.g. "aud", "given_name")
+    ///   - tokenType: The type of token to get the claim from (accessToken or idToken)
+    /// - Returns: A Claim object containing the claim name and value, or nil if not found
+    public func getClaim(claimName: String, tokenType: TokenType = .accessToken) -> Claim? {
+        guard auth.isAuthenticated() else {
+            logger.debug(message: "User not authenticated, cannot retrieve claim: \(claimName)")
+            return nil
+        }
+        
+        // Validate claim name - hard check
+        guard !claimName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            logger.error(message: "Invalid claim name: claim name cannot be empty or whitespace")
+            return nil
+        }
+        
+        // Validate token type - hard check like Python SDK
+        let validTokenTypes: [TokenType] = [.accessToken, .idToken]
+        guard validTokenTypes.contains(tokenType) else {
+            logger.error(message: "Invalid token_type '\(tokenType.rawValue)'. Valid types are: \(validTokenTypes.map { $0.rawValue })")
+            return nil
+        }
+        
+        // Use the existing getClaim method from Auth
+        return auth.getClaim(forKey: claimName, token: tokenType)
+    }
+    
+    /// Get all claims from the user's tokens
+    /// - Parameter tokenType: The type of token to get claims from (accessToken or idToken)
+    /// - Returns: A Claims object containing all claims from the token, or empty claims if not available
+    public func getAllClaims(tokenType: TokenType = .accessToken) -> Claims {
+        guard auth.isAuthenticated() else {
+            logger.debug(message: "User not authenticated, cannot retrieve claims")
+            return Claims(claims: [:])
+        }
+        
+        // Validate token type - hard check like Python SDK
+        let validTokenTypes: [TokenType] = [.accessToken, .idToken]
+        guard validTokenTypes.contains(tokenType) else {
+            logger.error(message: "Invalid token_type '\(tokenType.rawValue)'. Valid types are: \(validTokenTypes.map { $0.rawValue })")
+            return Claims(claims: [:])
+        }
+        
+        let lastTokenResponse = auth.getTokenResponse()
+        let tokenToParse = tokenType == .accessToken ? lastTokenResponse?.accessToken : lastTokenResponse?.idToken
+        
+        guard let token = tokenToParse else {
+            logger.error(message: "No token available for token type: \(tokenType.rawValue)")
+            return Claims(claims: [:])
+        }
+        
+        let parsedJWT = token.parsedJWT
+        
+        // Hard check: Warn if no claims are available - like Python SDK
+        if parsedJWT.isEmpty {
+            logger.error(message: "No claims available for token type: \(tokenType.rawValue)")
+        }
+        
+        return Claims(claims: parsedJWT as [String: Any])
+    }
+    
+    /// Get a claim using a predefined claim key
+    /// - Parameters:
+    ///   - claimKey: The predefined claim key to retrieve
+    ///   - tokenType: The type of token to get the claim from
+    /// - Returns: A Claim object containing the claim name and value, or nil if not found
+    public func getClaim(claimKey: ClaimKey, tokenType: TokenType = .accessToken) -> Claim? {
+        return getClaim(claimName: claimKey.rawValue, tokenType: tokenType)
+    }
+    
+    /// Get user information claims from the ID token
+    /// - Returns: A dictionary containing user information claims
+    public func getUserInfo() -> [String: Any] {
+        let idTokenClaims = getAllClaims(tokenType: .idToken)
+        let userInfoKeys: [ClaimKey] = [.email, .givenName, .familyName, .name, .picture, .emailVerified]
+        
+        var userInfo: [String: Any] = [:]
+        for key in userInfoKeys {
+            if let claim = idTokenClaims.getClaim(name: key.rawValue) {
+                userInfo[key.rawValue] = claim.value
+            }
+        }
+        
+        return userInfo
+    }
+    
+    /// Get organization information claims
+    /// - Returns: A dictionary containing organization information claims
+    public func getOrganizationInfo() -> [String: Any] {
+        let accessTokenClaims = getAllClaims(tokenType: .accessToken)
+        let orgKeys: [ClaimKey] = [.organizationCode, .organizationName, .organizationId, .organizationCodes]
+        
+        var orgInfo: [String: Any] = [:]
+        for key in orgKeys {
+            if let claim = accessTokenClaims.getClaim(name: key.rawValue) {
+                orgInfo[key.rawValue] = claim.value
+            }
+        }
+        
+        return orgInfo
+    }
+    
+    /// Get token validation claims (audience, issuer, expiration, etc.)
+    /// - Returns: A dictionary containing token validation claims
+    public func getTokenValidationInfo() -> [String: Any] {
+        let accessTokenClaims = getAllClaims(tokenType: .accessToken)
+        let validationKeys: [ClaimKey] = [.audience, .issuer, .subject, .expiration, .issuedAt, .notBefore]
+        
+        var validationInfo: [String: Any] = [:]
+        for key in validationKeys {
+            if let claim = accessTokenClaims.getClaim(name: key.rawValue) {
+                validationInfo[key.rawValue] = claim.value
+            }
+        }
+        
+        return validationInfo
+    }
+    
+    /// Check if a specific claim exists
+    /// - Parameters:
+    ///   - claimName: The name of the claim to check
+    ///   - tokenType: The type of token to check
+    /// - Returns: True if the claim exists, false otherwise
+    public func hasClaim(claimName: String, tokenType: TokenType = .accessToken) -> Bool {
+        // Validate claim name - hard check
+        guard !claimName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            logger.error(message: "Invalid claim name: claim name cannot be empty or whitespace")
+            return false
+        }
+        
+        // Validate token type - hard check like Python SDK
+        let validTokenTypes: [TokenType] = [.accessToken, .idToken]
+        guard validTokenTypes.contains(tokenType) else {
+            logger.error(message: "Invalid token_type '\(tokenType.rawValue)'. Valid types are: \(validTokenTypes.map { $0.rawValue })")
+            return false
+        }
+        
+        return getClaim(claimName: claimName, tokenType: tokenType) != nil
+    }
+    
+    /// Check if a specific claim exists using a predefined claim key
+    /// - Parameters:
+    ///   - claimKey: The predefined claim key to check
+    ///   - tokenType: The type of token to check
+    /// - Returns: True if the claim exists, false otherwise
+    public func hasClaim(claimKey: ClaimKey, tokenType: TokenType = .accessToken) -> Bool {
+        return hasClaim(claimName: claimKey.rawValue, tokenType: tokenType)
+    }
+    
+    /// Get custom claims (claims prefixed with "custom:")
+    /// - Returns: A dictionary containing all custom claims
+    public func getCustomClaims() -> [String: Any] {
+        let accessTokenClaims = getAllClaims(tokenType: .accessToken)
+        var customClaims: [String: Any] = [:]
+        
+        for (key, value) in accessTokenClaims.claims {
+            if key.hasPrefix("custom:") {
+                customClaims[key] = value
+            }
+        }
+        
+        return customClaims
+    }
+    
+    /// Get a specific custom claim
+    /// - Parameter claimName: The name of the custom claim (with or without "custom:" prefix)
+    /// - Returns: A Claim object containing the claim name and value, or nil if not found
+    public func getCustomClaim(claimName: String) -> Claim? {
+        // Validate claim name - hard check
+        guard !claimName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            logger.error(message: "Invalid custom claim name: claim name cannot be empty or whitespace")
+            return nil
+        }
+        
+        let fullClaimName = claimName.hasPrefix("custom:") ? claimName : "custom:\(claimName)"
+        return getClaim(claimName: fullClaimName, tokenType: .accessToken)
+    }
+}
+
+// MARK: - Convenience Methods
+extension ClaimsService {
+    
+    /// Get the user's email from the ID token
+    /// - Returns: The user's email address, or nil if not available
+    public func getEmail() -> String? {
+        return getClaim(claimKey: .email, tokenType: .idToken)?.value as? String
+    }
+    
+    /// Get the user's given name from the ID token
+    /// - Returns: The user's given name, or nil if not available
+    public func getGivenName() -> String? {
+        return getClaim(claimKey: .givenName, tokenType: .idToken)?.value as? String
+    }
+    
+    /// Get the user's family name from the ID token
+    /// - Returns: The user's family name, or nil if not available
+    public func getFamilyName() -> String? {
+        return getClaim(claimKey: .familyName, tokenType: .idToken)?.value as? String
+    }
+    
+    /// Get the user's full name from the ID token
+    /// - Returns: The user's full name, or nil if not available
+    public func getFullName() -> String? {
+        return getClaim(claimKey: .name, tokenType: .idToken)?.value as? String
+    }
+    
+    /// Get the user's picture URL from the ID token
+    /// - Returns: The user's picture URL, or nil if not available
+    public func getPicture() -> String? {
+        return getClaim(claimKey: .picture, tokenType: .idToken)?.value as? String
+    }
+    
+    /// Get the organization code from the access token
+    /// - Returns: The organization code, or nil if not available
+    public func getOrganizationCode() -> String? {
+        return getClaim(claimKey: .organizationCode, tokenType: .accessToken)?.value as? String
+    }
+    
+    /// Get the organization name from the access token
+    /// - Returns: The organization name, or nil if not available
+    public func getOrganizationName() -> String? {
+        return getClaim(claimKey: .organizationName, tokenType: .accessToken)?.value as? String
+    }
+    
+    /// Get the token audience from the access token
+    /// - Returns: The token audience, or nil if not available
+    public func getAudience() -> [String]? {
+        return getClaim(claimKey: .audience, tokenType: .accessToken)?.value as? [String]
+    }
+    
+    /// Get the token issuer from the access token
+    /// - Returns: The token issuer, or nil if not available
+    public func getIssuer() -> String? {
+        return getClaim(claimKey: .issuer, tokenType: .accessToken)?.value as? String
+    }
+    
+    /// Get the token expiration time from the access token
+    /// - Returns: The token expiration time as a Date, or nil if not available
+    public func getExpirationTime() -> Date? {
+        guard let expValue = getClaim(claimKey: .expiration, tokenType: .accessToken)?.value else {
+            return nil
+        }
+        
+        if let expTimestamp = expValue as? TimeInterval {
+            return Date(timeIntervalSince1970: expTimestamp)
+        } else if let expTimestamp = expValue as? Int {
+            return Date(timeIntervalSince1970: TimeInterval(expTimestamp))
+        }
+        
+        return nil
+    }
+    
+    /// Check if the token is expired
+    /// - Returns: True if the token is expired, false otherwise
+    public func isTokenExpired() -> Bool {
+        guard let expirationTime = getExpirationTime() else {
+            return true // If we can't determine expiration, assume it's expired
+        }
+        return Date() > expirationTime
+    }
+}
+import Foundation
+
+/// Mobile-focused entitlements and hard checks for iOS apps
+/// This class provides client-side validation of user entitlements, feature flags, and hard checks
+/// based on JWT token claims, following iOS mobile app best practices.
+public class MobileEntitlements {
+    private let auth: Auth
+    private let logger: LoggerProtocol
+    
+    public init(auth: Auth, logger: LoggerProtocol = DefaultLogger()) {
+        self.auth = auth
+        self.logger = logger
+    }
+    
+    // MARK: - Entitlements (User Permissions & Capabilities)
+    
+    /// Get all user entitlements from token claims
+    /// - Returns: Dictionary of entitlements with their values
+    public func getEntitlements() -> [String: Any] {
+        guard let entitlementsClaim = auth.getClaim(forKey: "entitlements") else {
+            logger.debug(message: "No entitlements claim found in token")
+            return [:]
+        }
+        
+        // Parse entitlements from the claim
+        if let claimString = entitlementsClaim as? String,
+           let data = claimString.data(using: .utf8),
+           let entitlements = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            return entitlements
+        }
+        
+        return [:]
+    }
+    
+    /// Check if user has a specific entitlement
+    /// - Parameters:
+    ///   - entitlement: The entitlement name to check
+    ///   - defaultValue: Default value if entitlement not found (hard check)
+    /// - Returns: The entitlement value or default value
+    public func getEntitlement(entitlement: String, defaultValue: Any = false) -> Any {
+        let entitlements = getEntitlements()
+        
+        if let value = entitlements[entitlement] {
+            return value
+        }
+        
+        // Hard check: Log when using default value
+        logger.debug(message: "Entitlement '\(entitlement)' not found, using default value: \(defaultValue)")
+        return defaultValue
+    }
+    
+    /// Check if user has a boolean entitlement
+    /// - Parameters:
+    ///   - entitlement: The entitlement name to check
+    ///   - defaultValue: Default value if entitlement not found
+    /// - Returns: Boolean entitlement value
+    public func getBooleanEntitlement(entitlement: String, defaultValue: Bool = false) -> Bool {
+        let value = getEntitlement(entitlement: entitlement, defaultValue: defaultValue)
+        
+        if let boolValue = value as? Bool {
+            return boolValue
+        } else if let stringValue = value as? String {
+            return Bool(stringValue) ?? defaultValue
+        }
+        
+        return defaultValue
+    }
+    
+    /// Check if user has a numeric entitlement
+    /// - Parameters:
+    ///   - entitlement: The entitlement name to check
+    ///   - defaultValue: Default value if entitlement not found
+    /// - Returns: Numeric entitlement value
+    public func getNumericEntitlement(entitlement: String, defaultValue: Int = 0) -> Int {
+        let value = getEntitlement(entitlement: entitlement, defaultValue: defaultValue)
+        
+        if let intValue = value as? Int {
+            return intValue
+        } else if let stringValue = value as? String {
+            return Int(stringValue) ?? defaultValue
+        }
+        
+        return defaultValue
+    }
+    
+    /// Check if user has a string entitlement
+    /// - Parameters:
+    ///   - entitlement: The entitlement name to check
+    ///   - defaultValue: Default value if entitlement not found
+    /// - Returns: String entitlement value
+    public func getStringEntitlement(entitlement: String, defaultValue: String = "") -> String {
+        let value = getEntitlement(entitlement: entitlement, defaultValue: defaultValue)
+        
+        if let stringValue = value as? String {
+            return stringValue
+        } else {
+            return String(describing: value)
+        }
+    }
+    
+    // MARK: - Feature Flags
+    
+    /// Get all feature flags from token claims
+    /// - Returns: Dictionary of feature flags with their values
+    public func getFeatureFlags() -> [String: Any] {
+        guard let flagsClaim = auth.getClaim(forKey: "feature_flags") else {
+            logger.debug(message: "No feature_flags claim found in token")
+            return [:]
+        }
+        
+        // Parse feature flags from the claim
+        if let claimString = flagsClaim as? String,
+           let data = claimString.data(using: .utf8),
+           let flags = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            return flags
+        }
+        
+        return [:]
+    }
+    
+    /// Check if a feature flag is enabled
+    /// - Parameters:
+    ///   - flag: The feature flag name to check
+    ///   - defaultValue: Default value if flag not found (hard check)
+    /// - Returns: Boolean indicating if feature is enabled
+    public func isFeatureEnabled(flag: String, defaultValue: Bool = false) -> Bool {
+        let flags = getFeatureFlags()
+        
+        if let value = flags[flag] {
+            if let boolValue = value as? Bool {
+                return boolValue
+            } else if let stringValue = value as? String {
+                return Bool(stringValue) ?? defaultValue
+            }
+        }
+        
+        // Hard check: Log when using default value
+        logger.debug(message: "Feature flag '\(flag)' not found, using default value: \(defaultValue)")
+        return defaultValue
+    }
+    
+    /// Get feature flag value with type safety
+    /// - Parameters:
+    ///   - flag: The feature flag name to check
+    ///   - defaultValue: Default value if flag not found
+    /// - Returns: Feature flag value
+    public func getFeatureFlag<T>(flag: String, defaultValue: T) -> T {
+        let flags = getFeatureFlags()
+        
+        if let value = flags[flag] as? T {
+            return value
+        }
+        
+        // Hard check: Log when using default value
+        logger.debug(message: "Feature flag '\(flag)' not found or type mismatch, using default value: \(defaultValue)")
+        return defaultValue
+    }
+    
+    // MARK: - Hard Checks (Client-Side Validation)
+    
+    /// Perform a hard check with validation and fallback
+    /// - Parameters:
+    ///   - checkName: Name of the check being performed
+    ///   - validation: Validation function that returns the result
+    ///   - fallbackValue: Fallback value if validation fails
+    /// - Returns: Result of validation or fallback value
+    public func performHardCheck<T>(checkName: String, validation: () -> T?, fallbackValue: T) -> T {
+        if let result = validation() {
+            logger.debug(message: "Hard check '\(checkName)' passed with value: \(result)")
+            return result
+        } else {
+            logger.error(message: "Hard check '\(checkName)' failed, using fallback: \(fallbackValue)")
+            return fallbackValue
+        }
+    }
+    
+    /// Validate user permissions with hard check
+    /// - Parameters:
+    ///   - permission: Permission to validate
+    ///   - fallbackAccess: Fallback access level if validation fails
+    /// - Returns: Access level (true/false or specific value)
+    public func validatePermission(permission: String, fallbackAccess: Bool = false) -> Bool {
+        return performHardCheck(
+            checkName: "permission_\(permission)",
+            validation: { auth.getPermission(name: permission) != nil },
+            fallbackValue: fallbackAccess
+        )
+    }
+    
+    /// Validate user role with hard check
+    /// - Parameters:
+    ///   - role: Role to validate
+    ///   - fallbackAccess: Fallback access level if validation fails
+    /// - Returns: Access level
+    public func validateRole(role: String, fallbackAccess: Bool = false) -> Bool {
+        return performHardCheck(
+            checkName: "role_\(role)",
+            validation: { 
+                // Check if role exists in claims
+                let rolesClaim = auth.getClaim(forKey: "roles")
+                if let rolesString = rolesClaim as? String {
+                    return rolesString.contains(role)
+                }
+                return false
+            },
+            fallbackValue: fallbackAccess
+        )
+    }
+    
+    /// Validate feature flag with hard check
+    /// - Parameters:
+    ///   - flag: Feature flag to validate
+    ///   - fallbackEnabled: Fallback enabled state if validation fails
+    /// - Returns: Feature enabled state
+    public func validateFeatureFlag(flag: String, fallbackEnabled: Bool = false) -> Bool {
+        return performHardCheck(
+            checkName: "feature_\(flag)",
+            validation: { isFeatureEnabled(flag: flag, defaultValue: fallbackEnabled) },
+            fallbackValue: fallbackEnabled
+        )
+    }
+    
+    /// Validate entitlement with hard check
+    /// - Parameters:
+    ///   - entitlement: Entitlement to validate
+    ///   - fallbackValue: Fallback value if validation fails
+    /// - Returns: Entitlement value
+    public func validateEntitlement<T>(entitlement: String, fallbackValue: T) -> T {
+        return performHardCheck(
+            checkName: "entitlement_\(entitlement)",
+            validation: { getEntitlement(entitlement: entitlement, defaultValue: fallbackValue) as? T },
+            fallbackValue: fallbackValue
+        )
+    }
+    
+    // MARK: - User Context Validation
+    
+    /// Check if user is authenticated (hard check)
+    /// - Returns: Authentication status
+    public func isUserAuthenticated() -> Bool {
+        return performHardCheck(
+            checkName: "user_authentication",
+            validation: { auth.isAuthenticated() },
+            fallbackValue: false
+        )
+    }
+    
+    /// Get user organization context with hard check
+    /// - Returns: Organization information
+    public func getUserOrganization() -> [String: Any] {
+        return performHardCheck(
+            checkName: "user_organization",
+            validation: { 
+                guard let orgCode = auth.getClaim(forKey: "org_code") else { return nil }
+                return ["org_code": orgCode]
+            },
+            fallbackValue: [:]
+        )
+    }
+    
+    /// Get user subscription tier with hard check
+    /// - Returns: Subscription tier information
+    public func getUserSubscriptionTier() -> String {
+        return performHardCheck(
+            checkName: "subscription_tier",
+            validation: { 
+                let claim = auth.getClaim(forKey: "subscription_tier")
+                return claim as? String
+            },
+            fallbackValue: "free"
+        )
+    }
+    
+    // MARK: - Usage Limits (Common Mobile Entitlements)
+    
+    /// Check API usage limit with hard check
+    /// - Parameters:
+    ///   - limitType: Type of limit (e.g., "api_calls", "storage_mb")
+    ///   - fallbackLimit: Fallback limit if not found
+    /// - Returns: Usage limit
+    public func getUsageLimit(limitType: String, fallbackLimit: Int = 1000) -> Int {
+        return validateEntitlement(entitlement: "\(limitType)_limit", fallbackValue: fallbackLimit)
+    }
+    
+    /// Check if user has premium features
+    /// - Returns: Premium status
+    public func hasPremiumFeatures() -> Bool {
+        return validateEntitlement(entitlement: "premium_features", fallbackValue: false)
+    }
+    
+    /// Check if user can access advanced features
+    /// - Returns: Advanced access status
+    public func hasAdvancedAccess() -> Bool {
+        return validateEntitlement(entitlement: "advanced_access", fallbackValue: false)
+    }
+    
+    /// Check storage limit in MB
+    /// - Returns: Storage limit in megabytes
+    public func getStorageLimitMB() -> Int {
+        return validateEntitlement(entitlement: "storage_limit_mb", fallbackValue: 100)
+    }
+    
+    /// Check API rate limit per hour
+    /// - Returns: API calls per hour limit
+    public func getAPIRateLimit() -> Int {
+        return validateEntitlement(entitlement: "api_rate_limit", fallbackValue: 1000)
+    }
 }

@@ -64,16 +64,10 @@ files:
    Models/Claims.swift: {
       destinationFilename: Sources/KindeSDK/Models/Claims.swift
    }
-   Models/ManagementModels.swift: {
-      destinationFilename: Sources/KindeSDK/Models/ManagementModels.swift
-   }
    Models/Pagination.swift: {
       destinationFilename: Sources/KindeSDK/Models/Pagination.swift
    }
    
-   Management/ManagementClient.swift: {
-      destinationFilename: Sources/KindeSDK/Management/ManagementClient.swift
-   }
    
    Utils/AtomicWrapper.swift: {
       destinationFilename: Sources/KindeSDK/Utils/AtomicWrapper.swift
@@ -108,9 +102,6 @@ files:
    }
    Tests/ClaimsSpec.swift: {
       destinationFilename: Tests/ClaimsSpec.swift
-   }
-   Tests/ManagementPaginationSpec.swift: {
-      destinationFilename: Tests/ManagementPaginationSpec.swift
    }
    CustomFiles/README.md: {
       destinationFilename: README.md
