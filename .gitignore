@@ -11,9 +11,11 @@ node_modules/
 *.xcworkspace/
 
 # Generated SDK files (keep templates and config, ignore generated output)
-KindeManagementAPI/
+KindeManagementAPI/*
 !KindeManagementAPI/README.md
 !KindeManagementAPI/LICENSE
+!KindeManagementAPI/Sources/**
+!KindeManagementAPI/Tests/**
 
 # Temporary scripts (these were used for the old approach)
 make-accounts-internal.sh
